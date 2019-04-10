@@ -1,0 +1,73 @@
+### Typically need to set higher memory ####
+memory.limit(size = 112000)
+
+######### LOGGING ON TO SERVER ###############
+library("RODBC", lib.loc="~/R/R-3.4.2/library")
+library("dplyr", lib.loc="~/R/R-3.4.2/library")
+library(arules)
+library(tidyr)
+library(ggrepel)
+library(arulesViz)
+library(RColorBrewer) 
+
+#Pulling in all order nums and items not sleep
+Alldata <- sqlQuery(mycon, "select orig_order_num, order_sold_dlrs, order_units, product_div_NH_desc, product_class_NH_desc, product_desc, product_style_code, product_sku, product_size_code from hadm_fact_order
+                    INNER JOIN hadm_product on hadm_product.product_key = hadm_fact_order.product_key
+                    Inner join hadm_date_calendar on hadm_date_calendar.date_key=hadm_fact_order.date_key
+                    where date_date between '2018-06-01' and '2018-08-08'  and order_type_key in (1,2,4,11,5,3)"
+)
+
+Uniquesprod51651<- sqlQuery(mycon, "select distinct(orig_order_num) from hadm_fact_order
+                            INNER JOIN hadm_product on hadm_product.product_key = hadm_fact_order.product_key
+                            Inner join hadm_date_calendar on hadm_date_calendar.date_key=hadm_fact_order.date_key
+                            where date_date between '2018-06-01' and '2018-08-08'  and order_type_key in (1,2,4,11,5,3) and product_style_code IN ('36754','41378') "
+)
+
+
+#matching 51651 orders
+AllProddata <- merge(Alldata, Uniquesprod51651, by = 'orig_order_num')
+Alss <- data.frame(AllProddata$orig_order_num, AllProddata$product_desc, AllProddata$order_units)  #For Product
+names(Alss)[1] <- 'ord_num'
+names(Alss)[2] <- 'div'
+names(Alss)[3] <- 'units2'
+
+Alss2 <- Alss %>%
+  group_by(ord_num, div) %>%
+  summarise(units2= sum(units2))
+
+#creating the matrix
+alss2 <- spread(Alss2, div, units2, convert = TRUE)
+alss2A <- alss2[,-c(1)]
+alss2A[is.na(alss2A)] <- 0
+
+order_matrix <- as.matrix(alss2A)
+order_trans <- as(order_matrix, "transactions")
+
+itemFrequencyPlot(order_trans, topN = 10, type = "absolute")
+
+rules <- apriori(order_trans, parameter = list(supp = 0.001, conf = 0.05, minlen = 2))
+rules<-sort(rules, decreasing=TRUE,by="count")
+
+#redundant rules elimination
+gi <- generatingItemsets(rules)
+d <- which(duplicated(gi))
+rules <- rules[-d] 
+rules<-sort(rules, decreasing=TRUE,by="count")
+inspect(rules[1:10])
+
+#turn to dataframe
+dfrules = data.frame(
+  lhs = labels(lhs(rules)),
+  rhs = labels(rhs(rules)), 
+  rules@quality)
+  
+### Different plots
+plot(rules,method= "graph",control = list(type = "items"))
+plot(rules)
+rules<-sort(rules, decreasing=TRUE,by="count")
+
+plot(rules,method= "graph",control = list(type = "items"))
+plot(rules,method="graph",engine='interactive',shading=NA)
+
+  
+  
